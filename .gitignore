@@ -1,0 +1,9 @@
+# Ignore build outputs
+build/
+
+# Ignore rad debug files
+*.raddbg_profile
+
+# Ignore Sublime files
+*.sublime-project
+*.sublime-workspace
