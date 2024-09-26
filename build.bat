@@ -12,7 +12,7 @@ cd /D "%~dp0"
 set app_name=c-file-read-bench-win64
 set app_version=1.0.0
 :: Libraries
-set linker_libs=Kernel32.lib User32.lib onecore.lib
+set linker_libs=Kernel32.lib User32.lib
 
 :: Source files are relative top the output path which will be \build\[debug or release]\.
 set source_files=..\..\src\main.c
