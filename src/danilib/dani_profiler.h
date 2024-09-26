@@ -4,7 +4,7 @@
 // Author: Dani Drywa (dani@drywa.me)
 // This library is based on what I learned from Casey Muratori's excellent performance aware programming course at https://www.computerenhance.com/ and some other resources about benchmarking.
 //
-// Last change: 2024/09/24 (yyyy/mm/dd)
+// Last change: 2024/09/26 (yyyy/mm/dd)
 //
 // License: See end of file
 //
@@ -13,6 +13,7 @@
 // Windows.h - for QueryPerformanceCounter and QueryPerformanceFrequency
 // Intrin.h - for __rdtsc, __rdtscp, __faststorefence, and _InterlockedIncrement
 // stdio.h - for printf. (can be removed by specifying DANI_PROFILER_PRINTF)
+// psapi.h - for GetProcessMemoryInfo if DANI_PROFILER_PAGE_FAULTS is enabled.
 //
 // Notes:
 // This library is *NOT* thread safe. If you are in need of profiling across multiple threads you have to make this code thread safe or you might want to consider using a different library better suited for your needs.
@@ -21,7 +22,8 @@
 // To use static versions of the functions specify DANI_PROFILER_STATIC before including this file.
 // By default the profiles is able to record up to 1024 entries. If you want to tweak this value specify DANI_PROFILER_ENTRIES_MAX before including this file.
 // To print the profiling results this library is using printf by default. However, you can change the print function by specifying DANI_PROFILER_PRINTF(...) before including this file.
-// To enable to disable the profiles define DANI_PROFILER_ENABLED with 1 or 0 respectively. By default the profiler is disabled. all profiling functions and macros will be stubbed out, with the exception of dani_BeginProfiling, dani_EndProfiling, and dani_PrintProfilingResults. These will still work and simply collect the overall elapsed time of the program without any sub-blocks.
+// To enable or disable the profiler define DANI_PROFILER_ENABLED with 1 or 0 respectively. By default the profiler is disabled. All profiling functions and macros will be stubbed out, with the exception of dani_BeginProfiling, dani_EndProfiling, and dani_PrintProfilingResults. These will still work and simply collect the overall elapsed time of the program without any sub-blocks.
+// To collect memory page fault metrics set DANI_PROFILER_PAGE_FAULTS to 1. This even takes effect if DANI_PROFILER_ENABLED is set to 0, it will just collect page faults for the overall runtime. Memory page faults are always an inclusive count, which means they include all page faults of sub-zones as well.
 //
 // How to use:
 // Enable the profiler by defining "DANI_PROFILER_ENABLED 1" before including the library. See Notes for details.
@@ -32,7 +34,7 @@
 // To time multiple statements of code use dani_BeginProfilingZone() and dani_EndProfilingZone() like so:
 // 
 // u32 index = dani_GetNextProfilerZoneIndex(); // The maximum valid index depends on DANI_PROFILER_ENTRIES_MAX.
-// dani_profiler_zone my_zone = dani_BeginProfilingZone("Zone Name", index); 
+// dani_profiler_zone my_zone = dani_BeginProfilingZone("Zone Name", index, 0); 
 // // Add your code you want to profile here
 // dani_EndProfilingZone(my_zone);
 //
@@ -51,6 +53,8 @@
 // }
 //
 // If the function returns the declaration of the return value and the return statement should not be in the dani_ProfileFunction block.
+//
+// The last argument of dani_BeginProfilingZone is the number of bytes that are about to be processed by the profiling zone. This can remain 0 if you don't with to track the bandwidth. To profile with the bandwidth included you have to provide the byte count. You can use the dani_ProfileBandwidth and dani_ProfileFunctionBandwidth macros in the same way you would use the dani_Profile and dani_ProfileFunction macros. The only difference is that it takes in a byte count argument as well.
 //
 #ifndef __DANI_LIB_PROFILER_H
 #define __DANI_LIB_PROFILER_H
@@ -75,13 +79,23 @@
 #define DANI_PROFILER_ENABLED 0
 #endif
 
+#ifndef DANI_PROFILER_PAGE_FAULTS
+#define DANI_PROFILER_PAGE_FAULTS 0
+#endif
+
 #if DANI_PROFILER_ENABLED
 
 typedef struct __DANI_PROFILER_ENTRY dani_profiler_entry;
 struct __DANI_PROFILER_ENTRY {
     u64 inclusive_ticks;
     u64 exclusive_ticks;
+
     u64 hit_counter;
+    u64 processed_bytes_counter;
+
+#if DANI_PROFILER_PAGE_FAULTS
+    u64 page_fault_counter;
+#endif // DANI_PROFILER_PAGE_FAULTS
 
     const s8 *name;
 };
@@ -92,6 +106,10 @@ struct __DANI_PROFILER_ZONE {
 
     u64 start_ticks;
     u64 inclusive_ticks;
+
+#if DANI_PROFILER_PAGE_FAULTS
+    u64 start_page_faults;
+#endif // DANI_PROFILER_PAGE_FAULTS
 
     u32 entry_index;
     u32 parent_index;
@@ -104,6 +122,11 @@ struct __DANI_PROFILER {
     u64 start_ticks;
     u64 end_ticks;
 
+#if DANI_PROFILER_PAGE_FAULTS
+    u64 start_page_faults;
+    u64 end_page_faults;
+#endif // DANI_PROFILER_PAGE_FAULTS
+
     u32 current_index;
 };
 
@@ -112,7 +135,7 @@ __DANI_PROFILER_DEC void dani_EndProfiling(void);
 __DANI_PROFILER_DEC void dani_PrintProfilingResults(void);
 
 __DANI_PROFILER_DEC u32 dani_GetNextProfilerZoneIndex(void);
-__DANI_PROFILER_DEC dani_profiler_zone dani_BeginProfilingZone(const s8 *name, u32 index);
+__DANI_PROFILER_DEC dani_profiler_zone dani_BeginProfilingZone(const s8 *name, u32 index, u64 byte_count);
 __DANI_PROFILER_DEC void dani_EndProfilingZone(dani_profiler_zone zone);
 
 #define dani_Profile(zone_name, profile_block) Statement({\
@@ -120,12 +143,20 @@ __DANI_PROFILER_DEC void dani_EndProfilingZone(dani_profiler_zone zone);
     if (__entry_index == 0) {\
         __entry_index = dani_GetNextProfilerZoneIndex();\
     }\
-    dani_profiler_zone __profile_zone = dani_BeginProfilingZone(zone_name, __entry_index);\
+    dani_profiler_zone __profile_zone = dani_BeginProfilingZone((zone_name), __entry_index, 0);\
     profile_block\
     dani_EndProfilingZone(__profile_zone);\
     })
 
-#define dani_ProfileFunction(profile_block) dani_Profile(__func__, profile_block)
+#define dani_ProfileBandwidth(zone_name, byte_count, profile_block) Statement({\
+    static u32 __entry_index = 0;\
+    if (__entry_index == 0) {\
+        __entry_index = dani_GetNextProfilerZoneIndex();\
+    }\
+    dani_profiler_zone __profile_zone = dani_BeginProfilingZone((zone_name), __entry_index, (byte_count));\
+    profile_block\
+    dani_EndProfilingZone(__profile_zone);\
+    })
 
 #else // NOT DANI_PROFILER_ENABLED
 
@@ -134,6 +165,11 @@ typedef struct __DANI_PROFILER dani_profiler;
 struct __DANI_PROFILER {
     u64 start_ticks;
     u64 end_ticks;
+
+#if DANI_PROFILER_PAGE_FAULTS
+    u64 start_page_faults;
+    u64 end_page_faults;
+#endif // DANI_PROFILER_PAGE_FAULTS
 };
 
 __DANI_PROFILER_DEC void dani_BeginProfiling(void);
@@ -149,9 +185,16 @@ __DANI_PROFILER_DEC void dani_PrintProfilingResults(void);
     profile_block\
     })
 
-#define dani_ProfileFunction(profile_block) dani_Profile(__func__, profile_block)
+#define dani_ProfileBandwidth(zone_name, byte_count, profile_block) Statement({\
+    Unused(zone_name);\
+    Unused(byte_count);\
+    profile_block\
+    })
 
 #endif // DANI_PROFILER_ENABLED
+
+#define dani_ProfileFunction(profile_block) dani_Profile(__func__, profile_block)
+#define dani_ProfileFunctionBandwidth(byte_count, profile_block) dani_ProfileBandwidth(__func__, byte_count, profile_block)
 
 #endif // __DANI_LIB_PROFILER_H
 
@@ -160,13 +203,17 @@ __DANI_PROFILER_DEC void dani_PrintProfilingResults(void);
 static u64 ReadOSTimer(void) {
     LARGE_INTEGER timer;
     QueryPerformanceCounter(&timer);
-    return (timer.QuadPart);
+
+    u64 result = timer.QuadPart;
+    return (result);
 }
 
 static u64 ReadOSTimerFrequency(void) {
     LARGE_INTEGER frequency;
     QueryPerformanceFrequency(&frequency);
-    return (frequency.QuadPart);
+
+    u64 result = frequency.QuadPart;
+    return (result);
 }
 
 static u64 ReadStartCPUTimer(void) {
@@ -208,9 +255,41 @@ static u64 ReadCPUTimerFrequency(u64 wait_time_ms) {
     return (result);
 }
 
+#if DANI_PROFILER_PAGE_FAULTS
+static void *g_dani_profiler_process_handle = 0;
+
+static u64 ReadOSPageFaultCount(void) {
+    PROCESS_MEMORY_COUNTERS memory_counters = {0};
+    memory_counters.cb = sizeof(memory_counters);
+
+    u64 result = 0;
+    b32 is_success = GetProcessMemoryInfo(g_dani_profiler_process_handle, &memory_counters, sizeof(memory_counters));
+    if (is_success) {
+        result = memory_counters.PageFaultCount;
+    }
+
+    return (result);
+}
+
+static void InitialiseOSProfilingMetrics(void) {
+    if (g_dani_profiler_process_handle == 0) {
+        u32 process_id = GetCurrentProcessId();
+        g_dani_profiler_process_handle = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, process_id);
+    }
+}
+#endif // DANI_PROFILER_PAGE_FAULTS
+
 static dani_profiler g_dani_profiler = {0};
 
 __DANI_PROFILER_DEF void dani_BeginProfiling(void) {
+    // Initialise profiling metrics if enabled
+#if DANI_PROFILER_PAGE_FAULTS
+    InitialiseOSProfilingMetrics();
+#endif // DANI_PROFILER_PAGE_FAULTS
+
+    // Reset global profiler in case it has been used before
+    memset(&g_dani_profiler, 0, sizeof(g_dani_profiler));
+
     // Warmup profiler
     ReadStartCPUTimer();
     ReadStartCPUTimer();
@@ -218,11 +297,19 @@ __DANI_PROFILER_DEF void dani_BeginProfiling(void) {
     ReadEndCPUTimer();
 
     // Start profiler
+#if DANI_PROFILER_PAGE_FAULTS
+    g_dani_profiler.start_page_faults = ReadOSPageFaultCount();
+#endif // DANI_PROFILER_PAGE_FAULTS
+
     g_dani_profiler.start_ticks = ReadStartCPUTimer();
 }
 
 __DANI_PROFILER_DEF void dani_EndProfiling(void) {
     g_dani_profiler.end_ticks = ReadEndCPUTimer();
+
+#if DANI_PROFILER_PAGE_FAULTS
+    g_dani_profiler.end_page_faults = ReadOSPageFaultCount();
+#endif // DANI_PROFILER_PAGE_FAULTS
 }
 
 static void PrintProfilingTimes(u64 elapsed_ticks, u64 cpu_frequency) {
@@ -245,20 +332,35 @@ static void PrintProfilingTimes(u64 elapsed_ticks, u64 cpu_frequency) {
     }
 }
 
-static void PrintProfilingValueAsSIUnit(u64 value, const s8 *base_unit) {
+static void PrintProfilingValueAsSIUnit(f64 value, const s8 *base_unit) {
     s8 prefix;
 
-    f64 fval = (f64)value;
-    if (value > Tera(1)) { prefix = 'T'; fval /= Tera(1); }
-    else if (value > Giga(1)) { prefix = 'G'; fval /= Giga(1); }
-    else if (value > Mega(1)) { prefix = 'M'; fval /= Mega(1); }
-    else if (value > Kilo(1)) { prefix = 'k'; fval /= Kilo(1); }
+    if (value > Tera(1)) { prefix = 'T'; value /= Tera(1); }
+    else if (value > Giga(1)) { prefix = 'G'; value /= Giga(1); }
+    else if (value > Mega(1)) { prefix = 'M'; value /= Mega(1); }
+    else if (value > Kilo(1)) { prefix = 'k'; value /= Kilo(1); }
     else { prefix = '\0'; }
 
     if (prefix) {
-        DANI_PROFILER_PRINTF("%0.2f%c%s", fval, prefix, base_unit);
+        DANI_PROFILER_PRINTF("%0.2f%c%s", value, prefix, base_unit);
     } else {
-        DANI_PROFILER_PRINTF("%llu%s", value, base_unit);
+        DANI_PROFILER_PRINTF("%0.2f%s", value, base_unit);
+    }
+}
+
+static void PrintProfilingByteCount(f64 byte_count) {
+    s8 *prefix;
+
+    if (byte_count > TiB(1)) { prefix = "TiB"; byte_count /= TiB(1); }
+    else if (byte_count > GiB(1)) { prefix = "GiB"; byte_count /= GiB(1); }
+    else if (byte_count > MiB(1)) { prefix = "MiB"; byte_count /= MiB(1); }
+    else if (byte_count > KiB(1)) { prefix = "KiB"; byte_count /= KiB(1); }
+    else { prefix = '\0'; }
+
+    if (prefix) {
+        DANI_PROFILER_PRINTF("%0.2f%s", byte_count, prefix);
+    } else {
+        DANI_PROFILER_PRINTF("%0.2fbyte", byte_count);
     }
 }
 
@@ -283,6 +385,17 @@ static void PrintInclusiveAndExclusiveProfilingTimes(u64 elapsed_inclusive, u64 
     PrintProfilingTimes(elapsed_exclusive, cpu_frequency);
 }
 
+static void PrintProfilingBandwidth(u64 processed_bytes_count, u64 elapsed_inclusive, u64 cpu_frequency) {
+    f64 ticks_per_second = ((f64)elapsed_inclusive / (f64)cpu_frequency);
+    f64 bytes_per_second = ((f64)processed_bytes_count / ticks_per_second);
+
+    DANI_PROFILER_PRINTF(", Bandwidth[");
+    PrintProfilingByteCount((f64)processed_bytes_count);
+    DANI_PROFILER_PRINTF("]: ");
+    PrintProfilingByteCount(bytes_per_second);
+    DANI_PROFILER_PRINTF("/s");
+}
+
 static volatile s32 g_dani_profiler_entry_index_conter = 0;
 
 __DANI_PROFILER_DEF u32 dani_GetNextProfilerZoneIndex(void) {
@@ -291,18 +404,25 @@ __DANI_PROFILER_DEF u32 dani_GetNextProfilerZoneIndex(void) {
     return (result);
 }
 
-__DANI_PROFILER_DEF dani_profiler_zone dani_BeginProfilingZone(const s8 *name, u32 index) {
+__DANI_PROFILER_DEF dani_profiler_zone dani_BeginProfilingZone(const s8 *name, u32 index, u64 byte_count) {
     dani_profiler_zone result = {0};
 
     result.name = name;
 
-    result.start_ticks = ReadStartCPUTimer();
-    result.inclusive_ticks = g_dani_profiler.entries[index].inclusive_ticks;
+    dani_profiler_entry *entry = &g_dani_profiler.entries[index];
+    entry->processed_bytes_counter += byte_count;
+    result.inclusive_ticks = entry->inclusive_ticks;
 
     result.entry_index = index;
     result.parent_index = g_dani_profiler.current_index;
 
     g_dani_profiler.current_index = index;
+    
+#if DANI_PROFILER_PAGE_FAULTS
+    result.start_page_faults = ReadOSPageFaultCount();
+#endif // DANI_PROFILER_PAGE_FAULTS
+
+    result.start_ticks = ReadStartCPUTimer();
     return (result);
 }
 
@@ -320,6 +440,11 @@ __DANI_PROFILER_DEF void dani_EndProfilingZone(dani_profiler_zone zone) {
     entry->hit_counter += 1;
     entry->name = zone.name;
 
+#if DANI_PROFILER_PAGE_FAULTS
+    u64 end_page_faults = ReadOSPageFaultCount();
+    entry->page_fault_counter = end_page_faults - zone.start_page_faults;
+#endif // DANI_PROFILER_PAGE_FAULTS
+
     g_dani_profiler.current_index = zone.parent_index;
 }
 
@@ -333,10 +458,17 @@ __DANI_PROFILER_DEF void dani_PrintProfilingResults(void) {
         DANI_PROFILER_PRINTF("Total time: ");
         PrintProfilingTimes(elapsed_total_ticks, cpu_frequency);
         DANI_PROFILER_PRINTF(" @ ");
-        PrintProfilingValueAsSIUnit(cpu_frequency, "Hz");
+        PrintProfilingValueAsSIUnit((f64)cpu_frequency, "Hz");
         DANI_PROFILER_PRINTF("\n");
 
-        #if DANI_PROFILER_ENABLED
+#if DANI_PROFILER_PAGE_FAULTS
+        u64 total_page_faults = g_dani_profiler.end_page_faults - g_dani_profiler.start_page_faults;
+        DANI_PROFILER_PRINTF("Total page faults: ");
+        PrintProfilingValueAsSIUnit((f64)total_page_faults, "");
+        DANI_PROFILER_PRINTF("\n");
+#endif // DANI_PROFILER_PAGE_FAULTS
+
+#if DANI_PROFILER_ENABLED
         for (u32 entry_index = 0; entry_index < ArrayCount(g_dani_profiler.entries); entry_index += 1) {
             dani_profiler_entry *entry = &g_dani_profiler.entries[entry_index];
             if (entry->inclusive_ticks) {
@@ -344,9 +476,20 @@ __DANI_PROFILER_DEF void dani_PrintProfilingResults(void) {
 
                 // Total time
                 DANI_PROFILER_PRINTF("  %s[", entry->name);
-                PrintProfilingValueAsSIUnit(entry->hit_counter, "");
+                PrintProfilingValueAsSIUnit((f64)entry->hit_counter, "");
                 DANI_PROFILER_PRINTF("] Total - ");
                 PrintInclusiveAndExclusiveProfilingTimes(entry->inclusive_ticks, entry->exclusive_ticks, elapsed_total_ticks, cpu_frequency);
+
+                if (entry->processed_bytes_counter) {
+                    PrintProfilingBandwidth(entry->processed_bytes_counter, entry->inclusive_ticks, cpu_frequency);
+                }
+
+#if DANI_PROFILER_PAGE_FAULTS
+                if (entry->page_fault_counter) {
+                    DANI_PROFILER_PRINTF(", Page faults: ");
+                    PrintProfilingValueAsSIUnit((f64)entry->page_fault_counter, "");
+                }
+#endif // DANI_PROFILER_PAGE_FAULTS
 
                 // Average time
                 u64 average_inclusive = entry->inclusive_ticks / entry->hit_counter;
@@ -355,10 +498,23 @@ __DANI_PROFILER_DEF void dani_PrintProfilingResults(void) {
                 DANI_PROFILER_PRINTF("\n    Average - ");
                 PrintInclusiveAndExclusiveProfilingTimes(average_inclusive, average_exclusive, elapsed_total_ticks, cpu_frequency);
 
+                if (entry->processed_bytes_counter) {
+                    u64 average_bytes = entry->processed_bytes_counter / entry->hit_counter;
+                    PrintProfilingBandwidth(average_bytes, average_inclusive, cpu_frequency);
+                }
+
+#if DANI_PROFILER_PAGE_FAULTS
+                if (entry->page_fault_counter) {
+                    f64 average_page_faults = ((f64)entry->page_fault_counter / (f64)entry->hit_counter);
+                    DANI_PROFILER_PRINTF(", Page faults: ");
+                    PrintProfilingValueAsSIUnit(average_page_faults, "");
+                }
+#endif // DANI_PROFILER_PAGE_FAULTS
+
                 DANI_PROFILER_PRINTF("\n");
             }
         }
-        #endif // DANI_PROFILER_ENABLED
+#endif // DANI_PROFILER_ENABLED
     } else {
         DANI_PROFILER_PRINTF("Total ticks: %llu (Failed to estimate CPU frequency!)\n", elapsed_total_ticks);
     }
