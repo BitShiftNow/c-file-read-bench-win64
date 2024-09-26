@@ -58,7 +58,7 @@ s32 main(s32 argc, s8 **argv) {
 
     u64 expected_count = RunBenchmark(0, &context);
 
-    for (u32 benchmark = 10; benchmark < BENCHMARK_COUNT; benchmark++) {
+    for (u32 benchmark = 1; benchmark < BENCHMARK_COUNT; benchmark++) {
         printf(".");
         fflush(stdout);
 
