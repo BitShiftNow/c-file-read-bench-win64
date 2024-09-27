@@ -35,19 +35,55 @@ struct BENCHMARK_CONTEXT {
 // Project includes
 #include "benchmarks.c"
 
-s32 main(s32 argc, s8 **argv) {
-    Unused(argc);
-    Unused(argv);
+u32 ReadIterationCountFromArguments(const s8 *argument) {
+    u32 result = 0;
 
-    const u32 iteration_count = 10; // TODO: Read iteration count from arguments
+    if (argument) {
+        u64 len = strlen(argument);
+        for (u64 i = 0; i < len; i++) {
+            u8 byte = argument[i];
+            b32 is_digit = ((byte - '0') < 10);
+            if (is_digit) {
+                result = (result * 10) + (byte - '0');
+                if (result > S32_MAX) {
+                    printf("Iteration argument too big. Using 1 by default.\n");
+                    result = 0;
+                    break;
+                }
+            } else {
+                printf("Invalid iteration count argument. Using 1 by default.\n");
+                result = 0;
+                break;
+            }
+        }
+    }
+
+    if (result == 0) {
+        printf("Invalid iteration count argument. Using 1 by default.\n");
+        result = 1;
+    }
+    return (result);
+}
+
+s32 main(s32 argc, s8 **argv) {
+    if (argc < 3) {
+        printf("Missing iteration count and filename argument.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    const u32 iteration_count = ReadIterationCountFromArguments(argv[1]);
 
     benchmark_context context = {0};
-    context.filename = "X:\\projects\\1billion\\measurements.txt"; // TODO: Read filename from arguments
+    context.filename = argv[2];
     
     // Get file length
     struct __stat64 stat;
     _stat64(context.filename, &stat);
     context.file_length = stat.st_size;
+    if (context.file_length == 0) {
+        printf("Couldn't get size of file %s\n", context.filename);
+        exit(EXIT_FAILURE);
+    }
 
     context.read_buffer.capacity = KiB(16);
     context.read_buffer.base = malloc(context.read_buffer.capacity);
@@ -80,6 +116,7 @@ s32 main(s32 argc, s8 **argv) {
 
     for (u32 buffer_index = 0; buffer_index < ArrayCount(buffer_sizes); buffer_index++) {
         printf("Running[%llu] ", buffer_sizes[buffer_index]);
+        fflush(stdout);
 
         context.read_buffer.capacity = buffer_sizes[buffer_index];
         context.read_buffer.base = malloc(context.read_buffer.capacity);
@@ -101,6 +138,7 @@ s32 main(s32 argc, s8 **argv) {
         }
     
         printf(" DONE\n");
+        fflush(stdout);
 
         dani_EndProfiling();
         dani_PrintProfilingResults();
