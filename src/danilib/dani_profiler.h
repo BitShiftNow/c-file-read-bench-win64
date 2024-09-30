@@ -4,7 +4,7 @@
 // Author: Dani Drywa (dani@drywa.me)
 // This library is based on what I learned from Casey Muratori's excellent performance aware programming course at https://www.computerenhance.com/ and some other resources about benchmarking.
 //
-// Last change: 2024/09/27 (yyyy/mm/dd)
+// Last change: 2024/09/29 (yyyy/mm/dd)
 //
 // License: See end of file
 //
@@ -344,6 +344,14 @@ static void PrintProfilingTimes(u64 elapsed_ticks, u64 cpu_frequency) {
         } else {
             DANI_PROFILER_PRINTF("%0.4fs (%0.4fms)", seconds, milliseconds);
         }
+    } else if (seconds >= 60.0) {
+        f64 minutes = (seconds / 60.0);
+        if (minutes >= 60.0) {
+            f64 hours = (minutes / 60.0);
+            DANI_PROFILER_PRINTF("%0.4fh", hours);
+        } else {
+            DANI_PROFILER_PRINTF("%0.4fmin", minutes);
+        }
     } else {
         DANI_PROFILER_PRINTF("%0.4fs", seconds);
     }
@@ -352,10 +360,10 @@ static void PrintProfilingTimes(u64 elapsed_ticks, u64 cpu_frequency) {
 static void PrintProfilingValueAsSIUnit(f64 value, const s8 *base_unit) {
     s8 prefix;
 
-    if (value > Tera(1)) { prefix = 'T'; value /= Tera(1); }
-    else if (value > Giga(1)) { prefix = 'G'; value /= Giga(1); }
-    else if (value > Mega(1)) { prefix = 'M'; value /= Mega(1); }
-    else if (value > Kilo(1)) { prefix = 'k'; value /= Kilo(1); }
+    if (value >= Tera(1)) { prefix = 'T'; value /= Tera(1); }
+    else if (value >= Giga(1)) { prefix = 'G'; value /= Giga(1); }
+    else if (value >= Mega(1)) { prefix = 'M'; value /= Mega(1); }
+    else if (value >= Kilo(1)) { prefix = 'k'; value /= Kilo(1); }
     else { prefix = '\0'; }
 
     u64 int_value = (u64)value;
@@ -371,10 +379,10 @@ static void PrintProfilingValueAsSIUnit(f64 value, const s8 *base_unit) {
 static void PrintProfilingByteCount(f64 byte_count) {
     s8 *prefix;
 
-    if (byte_count > TiB(1)) { prefix = "TiB"; byte_count /= TiB(1); }
-    else if (byte_count > GiB(1)) { prefix = "GiB"; byte_count /= GiB(1); }
-    else if (byte_count > MiB(1)) { prefix = "MiB"; byte_count /= MiB(1); }
-    else if (byte_count > KiB(1)) { prefix = "KiB"; byte_count /= KiB(1); }
+    if (byte_count >= TiB(1)) { prefix = "TiB"; byte_count /= TiB(1); }
+    else if (byte_count >= GiB(1)) { prefix = "GiB"; byte_count /= GiB(1); }
+    else if (byte_count >= MiB(1)) { prefix = "MiB"; byte_count /= MiB(1); }
+    else if (byte_count >= KiB(1)) { prefix = "KiB"; byte_count /= KiB(1); }
     else { prefix = "byte"; }
 
     u64 int_value = (u64)byte_count;

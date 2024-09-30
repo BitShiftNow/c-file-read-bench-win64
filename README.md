@@ -24,6 +24,21 @@ To run the built executable with the [RAD Debugger](https://github.com/EpicGames
 To create an executable that is ready for distribution use `build release publish`. The resulting build artefacts can be found under `build\publish`.
 
 
+## My Results
+
+I have run this benchmark on my personal development machine on a `12.85 GiB` large text file. My machine has the following configuration:
+
+* AMD Ryzen 7 7700 8-Core Processor @ 3.8GHz (5.35GHz Boost)
+* ASRock Mainboard B650M Pro RS WiFi
+* Corsair 32 GB (Dual-Channel 2x 16 GB) @ 2.39GHz
+* Samsung SSD 980 PRO 2TB NVMe (PCIe x4 16.0 GT/s @ x4 16.0 GT/s)
+
+
+
+
+
+
+
 ## License
 
 Unless stated otherwise in individual source files the license is `Public Domain (www.unlicense.org)`
