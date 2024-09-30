@@ -33,10 +33,16 @@ I have run this benchmark on my personal development machine on a `12.85 GiB` la
 * Corsair 32 GB (Dual-Channel 2x 16 GB) @ 2.39GHz
 * Samsung SSD 980 PRO 2TB NVMe (PCIe x4 16.0 GT/s @ x4 16.0 GT/s)
 
+And these are the results for all the different buffer sizes:
 
+![Benchmark result chart](results.png)
 
+Some notes on the results:
 
-
+* Overlapped performance is not ideal in this benchmark because the processing of the read data is negligible. It will probably help out a lot more in situations where a lot of processing is done on the data after reading a chunk.
+* The benchmarks had a warmup run which means all results are based on a cached file and not a cold run. I might update this to also include cold run results in future.
+* FileMapping generates a lot of page faults which can not be prevented (at least to my knowledge) and it also does not account for buffer allocations.
+* fread being better on low buffer sizes until around `4KiB` is due to the internal `4KiB` buffer used for reads.
 
 
 ## License
