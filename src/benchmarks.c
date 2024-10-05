@@ -5,23 +5,23 @@ static u64 fread_version(benchmark_context *context) {
 
     FILE *file = fopen(context->filename, "rb");
     if (file) {
-        dani_ProfileFunctionBandwidth(context->file_length, {
-            while (total_read < context->file_length) {
-                u64 read = fread(read_buffer.base, sizeof(u8), read_buffer.chunk_capacity, file);
-                if (read < read_buffer.chunk_capacity) {
-                    if (read == 0 || ferror(file)) {
-                        printf("Failed to read from file %s\n", context->filename);
-                        exit(EXIT_FAILURE);
-                    }
-                }
-                total_read += read;
-
-                // Do some simple counting
-                for (u64 i = 0; i < read; i++) {
-                    result += read_buffer.base[i];
+        dani_ProfileFunctionBandwidth(context->file_length);
+        while (total_read < context->file_length) {
+            u64 read = fread(read_buffer.base, sizeof(u8), read_buffer.chunk_capacity, file);
+            if (read < read_buffer.chunk_capacity) {
+                if (read == 0 || ferror(file)) {
+                    printf("Failed to read from file %s\n", context->filename);
+                    exit(EXIT_FAILURE);
                 }
             }
-        });
+            total_read += read;
+
+            // Do some simple counting
+            for (u64 i = 0; i < read; i++) {
+                result += read_buffer.base[i];
+            }
+        }
+        dani_ProfileFunctionEnd();
         fclose(file);
     } else {
         printf("Failed to open file %s\n", context->filename);
@@ -38,22 +38,22 @@ static u64 ReadFile_version(benchmark_context *context) {
 
     void *file = CreateFileA(context->filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
     if (file != INVALID_HANDLE_VALUE) {
-        dani_ProfileFunctionBandwidth(context->file_length, {
-            while (total_read < context->file_length) {
-                u32 read = 0;
-                b32 read_result = ReadFile(file, read_buffer.base, (DWORD)read_buffer.chunk_capacity, (LPDWORD)&read, 0);
-                if (IsFalse(read_result) || read == 0) {
-                    printf("Failed to read from file %s\n", context->filename);
-                    exit(EXIT_FAILURE);
-                }
-                total_read += read;
-
-                // Do some simple counting
-                for (u64 i = 0; i < read; i++) {
-                    result += read_buffer.base[i];
-                }
+        dani_ProfileFunctionBandwidth(context->file_length);
+        while (total_read < context->file_length) {
+            u32 read = 0;
+            b32 read_result = ReadFile(file, read_buffer.base, (DWORD)read_buffer.chunk_capacity, (LPDWORD)&read, 0);
+            if (IsFalse(read_result) || read == 0) {
+                printf("Failed to read from file %s\n", context->filename);
+                exit(EXIT_FAILURE);
             }
-        });
+            total_read += read;
+
+            // Do some simple counting
+            for (u64 i = 0; i < read; i++) {
+                result += read_buffer.base[i];
+            }
+        }
+        dani_ProfileFunctionEnd();
         CloseHandle(file);
     } else {
         printf("Failed to open file %s\n", context->filename);
@@ -70,22 +70,22 @@ static u64 ReadFileSequential_version(benchmark_context *context) {
 
     void *file = CreateFileA(context->filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, 0);
     if (file != INVALID_HANDLE_VALUE) {
-        dani_ProfileFunctionBandwidth(context->file_length, {
-            while (total_read < context->file_length) {
-                u32 read = 0;
-                b32 read_result = ReadFile(file, read_buffer.base, (DWORD)read_buffer.chunk_capacity, (LPDWORD)&read, 0);
-                if (IsFalse(read_result) || read == 0) {
-                    printf("Failed to read from file %s\n", context->filename);
-                    exit(EXIT_FAILURE);
-                }
-                total_read += read;
-
-                // Do some simple counting
-                for (u64 i = 0; i < read; i++) {
-                    result += read_buffer.base[i];
-                }
+        dani_ProfileFunctionBandwidth(context->file_length);
+        while (total_read < context->file_length) {
+            u32 read = 0;
+            b32 read_result = ReadFile(file, read_buffer.base, (DWORD)read_buffer.chunk_capacity, (LPDWORD)&read, 0);
+            if (IsFalse(read_result) || read == 0) {
+                printf("Failed to read from file %s\n", context->filename);
+                exit(EXIT_FAILURE);
             }
-        });
+            total_read += read;
+
+            // Do some simple counting
+            for (u64 i = 0; i < read; i++) {
+                result += read_buffer.base[i];
+            }
+        }
+        dani_ProfileFunctionEnd();
         CloseHandle(file);
     } else {
         printf("Failed to open file %s\n", context->filename);
@@ -136,73 +136,74 @@ static u64 ReadFileOverlapped_version(benchmark_context *context) {
 
     void *file = CreateFileA(context->filename, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, 0);
     if (file != INVALID_HANDLE_VALUE) {
-        dani_ProfileFunctionBandwidth(context->file_length, {
-            // Read first chunk from file in a blocking fashion
-            u32 read = 0;
-            OVERLAPPED overlapped = {0};
-            b32 read_result = ReadFile(file, &read_buffer.base[current_offset], (DWORD)read_buffer.chunk_capacity, 0, &overlapped);
-            if (IsFailure(read_result)) {
-                b32 is_io_pending = (GetLastError() == ERROR_IO_PENDING);
-                if (is_io_pending) {
-                    read_result = GetOverlappedResult(file, &overlapped, (LPDWORD)&read, B32_TRUE);
-                    if (IsFailure(read_result)) {
-                        printf("Failed to read from file %s\n", context->filename);
-                        exit(EXIT_FAILURE);
-                    }
-                } else {
+        dani_ProfileFunctionBandwidth(context->file_length);
+
+        // Read first chunk from file in a blocking fashion
+        u32 read = 0;
+        OVERLAPPED overlapped = {0};
+        b32 read_result = ReadFile(file, &read_buffer.base[current_offset], (DWORD)read_buffer.chunk_capacity, 0, &overlapped);
+        if (IsFailure(read_result)) {
+            b32 is_io_pending = (GetLastError() == ERROR_IO_PENDING);
+            if (is_io_pending) {
+                read_result = GetOverlappedResult(file, &overlapped, (LPDWORD)&read, B32_TRUE);
+                if (IsFailure(read_result)) {
                     printf("Failed to read from file %s\n", context->filename);
                     exit(EXIT_FAILURE);
                 }
+            } else {
+                printf("Failed to read from file %s\n", context->filename);
+                exit(EXIT_FAILURE);
+            }
+        }
+        total_read += read;
+        next_offset = (current_offset + read_buffer.chunk_capacity) % read_buffer.total_capacity;
+
+        // Read the next chunk from file in the background
+        overlapped = (OVERLAPPED){0};
+        overlapped.Offset     = (total_read&0x00000000FFFFFFFFull);
+        overlapped.OffsetHigh = (total_read&0xFFFFFFFF00000000ull) >> 32;
+
+        read_result = ReadFromFileOverlapped(file, &overlapped, &read_buffer.base[next_offset], read_buffer.chunk_capacity);
+        if (IsFailure(read_result)) {
+            printf("Failed to queue read from file %s\n", context->filename);
+            exit(EXIT_FAILURE);
+        }
+
+        // Do some simple counting on the first chunk
+        for (u64 i = current_offset; i < (current_offset + read); i++) {
+            result += read_buffer.base[i];
+        }
+
+        while (total_read < context->file_length) {
+            // Wait for the next chunk to be available
+            read_result = WaitForOverlappedReadToFinish(file, &overlapped, &read);
+            if (IsFailure(read_result)) {
+                printf("Failed to finish read from file %s\n", context->filename);
+                exit(EXIT_FAILURE);
             }
             total_read += read;
-            next_offset = (current_offset + read_buffer.chunk_capacity) % read_buffer.total_capacity;
+            current_offset = next_offset;
+            next_offset = (next_offset + read_buffer.chunk_capacity) % read_buffer.total_capacity;
 
-            // Read the next chunk from file in the background
-            overlapped = (OVERLAPPED){0};
-            overlapped.Offset     = (total_read&0x00000000FFFFFFFFull);
-            overlapped.OffsetHigh = (total_read&0xFFFFFFFF00000000ull) >> 32;
+            if (total_read < context->file_length) {
+                // Read the next chunk from file in the background
+                overlapped = (OVERLAPPED){0};
+                overlapped.Offset     = (total_read&0x00000000FFFFFFFFull);
+                overlapped.OffsetHigh = (total_read&0xFFFFFFFF00000000ull) >> 32;
 
-            read_result = ReadFromFileOverlapped(file, &overlapped, &read_buffer.base[next_offset], read_buffer.chunk_capacity);
-            if (IsFailure(read_result)) {
-                printf("Failed to queue read from file %s\n", context->filename);
-                exit(EXIT_FAILURE);
+                read_result = ReadFromFileOverlapped(file, &overlapped, &read_buffer.base[next_offset], read_buffer.chunk_capacity);
+                if (IsFailure(read_result)) {
+                    printf("Failed to queue read from file %s\n", context->filename);
+                    exit(EXIT_FAILURE);
+                }
             }
 
             // Do some simple counting on the first chunk
             for (u64 i = current_offset; i < (current_offset + read); i++) {
                 result += read_buffer.base[i];
             }
-
-            while (total_read < context->file_length) {
-                // Wait for the next chunk to be available
-                read_result = WaitForOverlappedReadToFinish(file, &overlapped, &read);
-                if (IsFailure(read_result)) {
-                    printf("Failed to finish read from file %s\n", context->filename);
-                    exit(EXIT_FAILURE);
-                }
-                total_read += read;
-                current_offset = next_offset;
-                next_offset = (next_offset + read_buffer.chunk_capacity) % read_buffer.total_capacity;
-
-                if (total_read < context->file_length) {
-                    // Read the next chunk from file in the background
-                    overlapped = (OVERLAPPED){0};
-                    overlapped.Offset     = (total_read&0x00000000FFFFFFFFull);
-                    overlapped.OffsetHigh = (total_read&0xFFFFFFFF00000000ull) >> 32;
-
-                    read_result = ReadFromFileOverlapped(file, &overlapped, &read_buffer.base[next_offset], read_buffer.chunk_capacity);
-                    if (IsFailure(read_result)) {
-                        printf("Failed to queue read from file %s\n", context->filename);
-                        exit(EXIT_FAILURE);
-                    }
-                }
-
-                // Do some simple counting on the first chunk
-                for (u64 i = current_offset; i < (current_offset + read); i++) {
-                    result += read_buffer.base[i];
-                }
-            }
-        });
+        }
+        dani_ProfileFunctionEnd();
         CloseHandle(file);
     } else {
         printf("Failed to open file %s\n", context->filename);
@@ -227,13 +228,12 @@ static u64 FileMapping_version(benchmark_context *context) {
                 printf("Failed to create view for file %s\n", context->filename);
                 exit(EXIT_FAILURE);
             } else {
-               dani_ProfileFunctionBandwidth(context->file_length, {
-                    // Do some counting
-                    for (u64 i = 0; i < context->file_length; i++) {
-                        result += base[i];
-                    }
-                });
-
+                dani_ProfileFunctionBandwidth(context->file_length);
+                // Do some counting
+                for (u64 i = 0; i < context->file_length; i++) {
+                    result += base[i];
+                }
+                dani_ProfileFunctionEnd();
                 UnmapViewOfFile(base);
             }
             CloseHandle(mapping);
